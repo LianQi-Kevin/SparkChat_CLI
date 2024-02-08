@@ -1,4 +1,6 @@
+Pydantic
 websocket_client
+python-dotenv
 
 # CLI
 rich
