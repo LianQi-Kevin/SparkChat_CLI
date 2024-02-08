@@ -1,0 +1,9 @@
+websocket_client
+
+# CLI
+rich
+PyInquirer
+prompt-toolkit==1.0.14
+
+# packaging
+pyinstaller
