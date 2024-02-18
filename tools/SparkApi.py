@@ -7,7 +7,7 @@ import threading
 import time
 from datetime import datetime
 from email.utils import formatdate
-from typing import Tuple
+from typing import Tuple, Literal
 from urllib.parse import urlencode, urlparse
 from uuid import uuid4
 
@@ -19,7 +19,7 @@ from tools.SparkTypes import SparkRequest, SparkRequestParameterChat, SparkRespo
 from tools.logging_utils import log_set
 
 
-def get_spark_url(version: str = '1.5') -> Tuple[str, str]:
+def get_spark_url(version: Literal['1.5', '2.0', '3.0', '3.5'] = '1.5') -> Tuple[str, str]:
     """
     获取讯飞语音交互API的URL
     :returns: (domain, spark_url)
@@ -38,8 +38,9 @@ def get_spark_url(version: str = '1.5') -> Tuple[str, str]:
 
 class SparkApi(object):
     # todo: 使用时继承该类，并覆盖on_message和ws_run方法
-    def __init__(self, APPID: str, APIKey: str, APISecret: str, userid: str = None,
-                 system_msg: str = "Your a helpful assistant.", model_version: str = "1.5"):
+    def __init__(self, APPID: str, APIKey: str, APISecret: str, userid: str = uuid4().hex,
+                 system_msg: str = "Your a helpful assistant.",
+                 model_version: Literal['1.5', '2.0', '3.0', '3.5'] = "1.5"):
         # API
         self.APPID = APPID
         self.APIKey = APIKey
@@ -48,13 +49,12 @@ class SparkApi(object):
 
         # Chat
         self.ws = None
-        self.uid = userid if userid is not None else uuid4().hex
+        self.uid = userid
         self.chat_id = f"{datetime.now().strftime('%y%m%d%H%M%S')}_{str(uuid4())[:8]}"
         self.result = ""
         self.conversations = [{"role": "system", "content": system_msg}]
-        # self.conversations = []
 
-        self.ws_start()
+        # self.ws_start()
 
     def create_url(self, spark_url: str = "wss://spark-api.xf-yun.com/v1.1/chat") -> str:
         """
@@ -108,6 +108,8 @@ class SparkApi(object):
 
     def ws_run(self, params: SparkRequestParameterChat = None):
         time.sleep(1)
+        if self.ws is None:
+            self.ws_start()
         user_message = input("You: ")
 
         if user_message == "exit":
@@ -115,7 +117,9 @@ class SparkApi(object):
             exit()
 
         try:
-            self.ws.send(self.gen_params(user_message, params))
+            data = self.gen_params(user_message, params)
+            logging.info(data)
+            self.ws.send(data)
         except ValidationError as e:
             print(e)
 

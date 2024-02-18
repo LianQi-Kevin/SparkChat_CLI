@@ -1,18 +1,25 @@
 import logging
+import platform
 
 
 class ColorHandler(logging.StreamHandler):
-    COLOR_MAP = {logging.DEBUG: "\033[0;37m",
-                 logging.INFO: "\033[0;36m",
-                 logging.WARNING: "\033[0;33m",
-                 logging.ERROR: "\033[0;31m",
-                 logging.CRITICAL: "\033[0;35m"}
+    COLOR_MAP = {
+        logging.DEBUG: "\033[0;37m",  # White
+        logging.INFO: "\033[0;36m",  # Cyan
+        logging.WARNING: "\033[0;33m",  # Yellow
+        logging.ERROR: "\033[0;31m",  # Red
+        logging.CRITICAL: "\033[0;35m"  # Magenta
+    }
+    RESET_SEQ = "\033[0m"
 
     def emit(self, record):
         # 根据日志等级添加颜色
-        color = self.COLOR_MAP.get(record.levelno)
+        color = self.COLOR_MAP.get(record.levelno, '')
         message = self.format(record)
-        self.stream.write(f"{color}{message}\033[0m\n")
+        if platform.system() == "Windows":
+            self.stream.write(f"{message}\n")
+        else:
+            self.stream.write(f"{color}{message}{self.RESET_SEQ}\n")
 
 
 def log_set(log_level=logging.INFO, log_save: bool = False, save_path: str = "logging.log"):
