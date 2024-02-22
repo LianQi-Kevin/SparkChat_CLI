@@ -7,16 +7,27 @@ import threading
 import time
 from datetime import datetime
 from email.utils import formatdate
-from typing import Tuple, Literal
+from typing import Tuple, Literal, Dict, List
 from urllib.parse import urlencode, urlparse
 from uuid import uuid4
 
 import websocket
-from dotenv import dotenv_values
-from pydantic import ValidationError
 
 from tools.SparkTypes import SparkRequest, SparkRequestParameterChat, SparkResponse
 from tools.logging_utils import log_set
+
+
+def get_length(conversations: List[Dict[str, str]]):
+    length = 0
+    for content in conversations:
+        length += len(content["content"])
+    return length
+
+
+def check_len(conversations: List[Dict[str, str]]):
+    while get_length(conversations) > 8000:
+        del conversations[0]
+    return conversations
 
 
 def get_spark_url(version: Literal['1.5', '2.0', '3.0', '3.5'] = '1.5') -> Tuple[str, str]:
@@ -37,8 +48,8 @@ def get_spark_url(version: Literal['1.5', '2.0', '3.0', '3.5'] = '1.5') -> Tuple
 
 
 class SparkApi(object):
-    # todo: 使用时继承该类，并覆盖on_message和ws_run方法
     def __init__(self, APPID: str, APIKey: str, APISecret: str, userid: str = uuid4().hex,
+                 params: SparkRequestParameterChat = None,
                  system_msg: str = "Your a helpful assistant.",
                  model_version: Literal['1.5', '2.0', '3.0', '3.5'] = "1.5"):
         # API
@@ -46,15 +57,17 @@ class SparkApi(object):
         self.APIKey = APIKey
         self.APISecret = APISecret
         self.domain, self.sparkUrl = get_spark_url(version=model_version)
+        self.params = params if params is not None else SparkRequestParameterChat()
+        self.params.domain = self.domain
 
         # Chat
         self.ws = None
         self.uid = userid
         self.chat_id = f"{datetime.now().strftime('%y%m%d%H%M%S')}_{str(uuid4())[:8]}"
         self.result = ""
-        self.conversations = [{"role": "system", "content": system_msg}]
-
-        # self.ws_start()
+        self.conversations = [{"role": "system", "content": system_msg}] if model_version == "3.5" else []
+        self.connect_error = False
+        self.status_code = 2
 
     def create_url(self, spark_url: str = "wss://spark-api.xf-yun.com/v1.1/chat") -> str:
         """
@@ -82,46 +95,38 @@ class SparkApi(object):
         # 拼接鉴权参数，生成url
         return f"{spark_url}?{urlencode(auth_params)}"
 
-    def gen_params(self, user_message: str, params: SparkRequestParameterChat = None) -> str:
+    def gen_params(self, user_message: str) -> str:
         self.conversations.append({"role": "user", "content": user_message})
         request_params = {
             "header": {"app_id": self.APPID, "uid": self.uid},
             "parameter": {"chat": {"domain": self.domain, "chat_id": self.chat_id}},
-            "payload": {"message": {"text": self.conversations}}}
+            "payload": {"message": {"text": check_len(self.conversations)}}
+        }
 
-        if params:
-            request_params["parameter"]["chat"].update(params.model_dump())
+        request_params["parameter"]["chat"].update(self.params.model_dump())
 
         # verify params && to json
         return SparkRequest(**request_params).model_dump_json()
 
     def ws_start(self, enableTrace: bool = False):
         websocket.enableTrace(enableTrace)
-        self.ws = websocket.WebSocketApp(
-            url=self.create_url(self.sparkUrl),
-            on_open=self.on_open,
-            on_message=self.on_message,
-            on_close=self.on_close,
-            on_error=self.on_error,
-        )
+        self.ws = websocket.WebSocketApp(url=self.create_url(self.sparkUrl), on_open=self.on_open,
+                                         on_message=self.on_message, on_close=self.on_close,
+                                         on_error=self.on_error)
         self.ws.run_forever()
 
-    def ws_run(self, params: SparkRequestParameterChat = None):
-        time.sleep(1)
-        if self.ws is None:
-            self.ws_start()
+    def ws_run(self):
         user_message = input("You: ")
 
-        if user_message == "exit":
+        if user_message in ["exit", "exit()", "break", "quit", "stop"]:
             self.ws.close()
-            exit()
+            self.connect_error = True
+            time.sleep(2)
 
-        try:
-            data = self.gen_params(user_message, params)
-            logging.info(data)
-            self.ws.send(data)
-        except ValidationError as e:
-            print(e)
+        data = self.gen_params(user_message)
+        logging.debug(f"Request data: {data}")
+
+        self.ws.send(data)
 
         print("星火: ", end=" ")
 
@@ -130,41 +135,49 @@ class SparkApi(object):
 
     def on_message(self, ws, message):
         logging.debug(message)
-        data = SparkResponse(**json.loads(message)).model_dump()
-        if data["header"]["code"] != 0:
-            print(f'请求错误: {data["header"]["code"]}, {data}')
-            self.ws.close()
+        data = SparkResponse(**json.loads(message))
+
+        if data.header.code != 0:
+            logging.error(f'请求错误: {data.header.code}, {data}')
+            self.on_error(None, data.header.message)
         else:
-            content = data["payload"]["choices"]["text"][0]["content"]
+            content = data.payload.choices.text[0].content
             print(content, end="")
             self.result += content
-            if data["payload"]["choices"]["status"] == 2:
-                print('\n')
+            self.status_code = data.payload.choices.status
+            if self.status_code == 2:
                 self.conversations.append({"role": "assistant", "content": self.result})
                 self.ws.close()
 
     def on_close(self, ws, one, two):
         logging.debug("### Connection closed ###")
-        self.chat_id = f"{datetime.now().strftime('%y%m%d%H%M%S')}_{str(uuid4())[:8]}"
+        # self.chat_id = f"{datetime.now().strftime('%y%m%d%H%M%S')}_{str(uuid4())[:8]}"
         self.result = ""
-        self.ws_start()
+        print(" ")
 
-    @staticmethod
-    def on_error(ws, error):
-        logging.error(f"### error: {error}")
+    def on_error(self, ws, error):
+        logging.error(f"### Connection ERROR")
+        logging.debug(f"### error message: {error}")
+        self.connect_error = True
 
 
 if __name__ == '__main__':
-    log_set(logging.INFO)
+    log_set(logging.DEBUG)
 
     config = {
-        **dotenv_values("../.env"),
-        **dotenv_values("../.env.local"),
+        "app_id": "",
+        "api_key": "",
+        "api_secret": "",
     }
 
     spark = SparkApi(
-        APPID=config["Spark_APPID"],
-        APIKey=config["Spark_APIKey"],
-        APISecret=config["Spark_APISecret"],
-        model_version="1.5")
-    spark.ws_run()
+        APPID=config["app_id"],
+        APIKey=config["api_key"],
+        APISecret=config["api_secret"],
+        model_version="3.5")
+
+    while not spark.connect_error:
+        if spark.status_code != 2:
+            continue
+        spark.ws_start(enableTrace=True)
+        time.sleep(1)

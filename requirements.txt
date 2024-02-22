@@ -3,7 +3,7 @@ websocket_client
 python-dotenv
 
 # CLI
-rich
+# rich
 PyInquirer
 prompt-toolkit==1.0.14
 

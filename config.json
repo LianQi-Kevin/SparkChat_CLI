@@ -1,9 +1,0 @@
-{
-  "app_id": "",
-  "api_key": "",
-  "api_secret": "",
-  "model_version": "3.5",
-  "temperature": "0.6",
-  "max_tokens": "8192",
-  "top_k": "4"
-}

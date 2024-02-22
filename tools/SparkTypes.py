@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal, List, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class SparkRequestHeader(BaseModel):
@@ -25,11 +25,6 @@ class SparkRequestPayloadMessageText(BaseModel):
 
 class SparkRequestPayloadMessage(BaseModel):
     text: List[SparkRequestPayloadMessageText]
-
-    @model_validator(mode='after')
-    def check_text_length(self) -> 'SparkRequestPayloadMessage':
-        # todo: 校验对话列表token长度
-        return self
 
 
 class SparkRequestParameter(BaseModel):
@@ -85,7 +80,7 @@ class SparkResponsePayload(BaseModel):
 
 class SparkResponse(BaseModel):
     header: SparkResponseHeader
-    payload: SparkResponsePayload
+    payload: SparkResponsePayload = None
 
 
 if __name__ == '__main__':
