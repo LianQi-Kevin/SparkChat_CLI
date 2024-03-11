@@ -97,7 +97,8 @@ if __name__ == '__main__':
         APIKey=config["api_key"],
         APISecret=config["api_secret"],
         model_version=config["model_version"],
-        params=SparkRequestParameterChat(**config)
+        params=SparkRequestParameterChat(**config),
+        save_history=True,
     )
 
     while not spark.connect_error:

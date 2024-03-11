@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime
@@ -15,6 +16,9 @@ import websocket
 
 from tools.SparkTypes import SparkRequest, SparkRequestParameterChat, SparkResponse
 from tools.logging_utils import log_set
+
+
+EXIT_COMMANDS = ["exit", "exit()", "break", "quit", "stop"]
 
 
 def get_length(conversations: List[Dict[str, str]]):
@@ -51,7 +55,8 @@ class SparkApi(object):
     def __init__(self, APPID: str, APIKey: str, APISecret: str, userid: str = uuid4().hex,
                  params: SparkRequestParameterChat = None,
                  system_msg: str = "Your a helpful assistant.",
-                 model_version: Literal['1.5', '2.0', '3.0', '3.5'] = "1.5"):
+                 model_version: Literal['1.5', '2.0', '3.0', '3.5'] = "1.5",
+                 save_history: bool = False, history_path: str = "history"):
         # API
         self.APPID = APPID
         self.APIKey = APIKey
@@ -68,6 +73,22 @@ class SparkApi(object):
         self.conversations = [{"role": "system", "content": system_msg}] if model_version == "3.5" else []
         self.connect_error = False
         self.status_code = 2
+
+        # history cache
+        self.save_history = save_history
+        self.history_path = history_path
+        self.chat_cache_path = os.path.join(self.history_path, f"chat_{self.chat_id}.txt")
+        self._init_history()
+
+    def _init_history(self):
+        if self.save_history:
+            os.makedirs(os.path.dirname(self.chat_cache_path), exist_ok=True)
+
+            with open(self.chat_cache_path, "w") as f:
+                f.write(f"-------      Info       ------\n")
+                f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Chat ID: {self.chat_id}\n\n")
+                f.write(f"-------  Conversations  ------\n")
 
     def create_url(self, spark_url: str = "wss://spark-api.xf-yun.com/v1.1/chat") -> str:
         """
@@ -118,10 +139,15 @@ class SparkApi(object):
     def ws_run(self):
         user_message = input("You: ")
 
-        if user_message in ["exit", "exit()", "break", "quit", "stop"]:
+        if user_message in EXIT_COMMANDS:
             self.ws.close()
             self.connect_error = True
             time.sleep(2)
+            return
+
+        if self.save_history and user_message not in EXIT_COMMANDS:
+            with open(self.chat_cache_path, "a") as f:
+                f.write(f"You: {user_message}\n")
 
         data = self.gen_params(user_message)
         logging.debug(f"Request data: {data}")
@@ -148,6 +174,9 @@ class SparkApi(object):
             if self.status_code == 2:
                 self.conversations.append({"role": "assistant", "content": self.result})
                 self.ws.close()
+                if self.save_history:
+                    with open(self.chat_cache_path, "a") as f:
+                        f.write(f"Spark: {self.result}\n")
 
     def on_close(self, ws, one, two):
         logging.debug("### Connection closed ###")
